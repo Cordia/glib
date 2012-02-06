@@ -198,7 +198,7 @@ AM_CONDITIONAL(MS_LIB_AVAILABLE, [test x$ms_librarian = xyes])
 if test "$glib_native_win32" != yes; then
     # libtool option to control which symbols are exported
     # right now, symbols starting with _ are not exported
-    LIBTOOL_EXPORT_OPTIONS='-export-symbols-regex "^g.*"'
+    LIBTOOL_EXPORT_OPTIONS='-export-symbols-regex "^[[^_]].*"'
 else
     # We currently use .def files on Windows
     LIBTOOL_EXPORT_OPTIONS=

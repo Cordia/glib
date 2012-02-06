@@ -126,6 +126,14 @@ union	_GTokenValue
   guint		v_error;
 };
 
+#ifdef MAEMO_CHANGES
+/* cache flags, private */
+typedef enum
+{
+  HILDON_SCANNER_CACHE_FLAGS_WRITE   = 1
+} HildonScannerCacheFlags;
+#endif /* MAEMO_CHANGES */
+
 struct	_GScannerConfig
 {
   /* Character sets
@@ -210,12 +218,26 @@ struct	_GScanner
   /*< public >*/
   /* handler function for _warn and _error */
   GScannerMsgFunc	msg_handler;
+
+#ifdef MAEMO_CHANGES
+  /* caching, private */
+  gint                    cache_fd;
+  HildonScannerCacheFlags cache_flags;
+  gsize                   cache_size;
+  gpointer                cache_base;
+  const gchar            *cache_p;
+  const gchar            *cache_end;
+#endif /* MAEMO_CHANGES */
 };
 
 GScanner*	g_scanner_new			(const GScannerConfig *config_templ);
 void		g_scanner_destroy		(GScanner	*scanner);
 void		g_scanner_input_file		(GScanner	*scanner,
 						 gint		input_fd);
+#ifdef MAEMO_CHANGES
+void            hildon_g_scanner_cache_open     (GScanner       *scanner,
+                                                 const gchar    *filename);
+#endif /* MAEMO_CHANGES */
 void		g_scanner_sync_file_offset	(GScanner	*scanner);
 void		g_scanner_input_text		(GScanner	*scanner,
 						 const	gchar	*text,

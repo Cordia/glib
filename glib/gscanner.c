@@ -44,6 +44,13 @@
 
 #include "gscanner.h"
 
+#ifdef MAEMO_CHANGES
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include "gstdio.h"
+#endif /* MAEMO_CHANGES */
 #include "gprintfint.h"
 #include "gstrfuncs.h"
 #include "gstring.h"
@@ -281,6 +288,10 @@
 )
 #define	READ_BUFFER_SIZE	(4000)
 
+#ifdef MAEMO_CHANGES
+#define INPUT_NAME(scanner) ((scanner)->input_name ? (scanner)->input_name : "<memory>")
+#endif /* MAEMO_CHANGES */
+
 
 /* --- typedefs --- */
 typedef	struct	_GScannerKey	GScannerKey;
@@ -466,7 +477,15 @@ g_scanner_new (const GScannerConfig *config_templ)
   scanner->scope_id = 0;
   
   scanner->msg_handler = g_scanner_msg_handler;
-  
+
+#ifdef MAEMO_CHANGES
+  scanner->cache_fd = -1;
+  scanner->cache_size = 0;
+  scanner->cache_base = NULL;
+  scanner->cache_p = NULL;
+  scanner->cache_flags = 0;
+#endif /* MAEMO_CHANGES */
+
   return scanner;
 }
 
@@ -517,8 +536,21 @@ g_scanner_destroy (GScanner *scanner)
   g_hash_table_foreach (scanner->symbol_table, 
 			g_scanner_destroy_symbol_table_entry, NULL);
   g_hash_table_destroy (scanner->symbol_table);
-  g_scanner_free_value (&scanner->token, &scanner->value);
-  g_scanner_free_value (&scanner->next_token, &scanner->next_value);
+#ifdef MAEMO_CHANGES
+  if (scanner->cache_base != NULL)
+    {
+      munmap (scanner->cache_base, scanner->cache_size);
+    }
+  else
+    {
+#endif /* MAEMO_CHANGES */
+      g_scanner_free_value (&scanner->token, &scanner->value);
+      g_scanner_free_value (&scanner->next_token, &scanner->next_value);
+#ifdef MAEMO_CHANGES
+    }
+  if (scanner->cache_fd != -1)
+    close (scanner->cache_fd);
+#endif /* MAEMO_CHANGES */
   g_free (scanner->config);
   g_free (scanner->buffer);
   g_free (scanner);
@@ -532,7 +564,11 @@ g_scanner_msg_handler (GScanner		*scanner,
   g_return_if_fail (scanner != NULL);
   
   _g_fprintf (stderr, "%s:%d: ",
-	      scanner->input_name ? scanner->input_name : "<memory>",
+#ifdef MAEMO_CHANGES
+	      INPUT_NAME (scanner),
+#else
+              scanner->input_name ? scanner->input_name : "<memory>",
+#endif /* MAEMO_CHANGES */
 	      scanner->line);
   if (is_error)
     _g_fprintf (stderr, "error: ");
@@ -922,6 +958,93 @@ g_scanner_scope_foreach_symbol (GScanner       *scanner,
   g_hash_table_foreach (scanner->symbol_table, g_scanner_foreach_internal, d);
 }
 
+#ifdef MAEMO_CHANGES
+static gboolean
+g_scanner_get_token_cache (GScanner    *scanner,
+                           GTokenType  *token_p,
+                           GTokenValue *value_p,
+                           guint       *line_p,
+                           guint       *position_p)
+{
+  gint len;
+
+  if (scanner->cache_p == NULL)
+    return FALSE;
+
+  if (scanner->cache_p == scanner->cache_end)
+    {
+      *token_p = G_TOKEN_EOF;
+      return TRUE;
+    }
+
+#define ENSURE_AVAILABLE(scanner, bytes) \
+  if (scanner->cache_p + (bytes) > scanner->cache_end) \
+    goto eof
+
+  ENSURE_AVAILABLE(scanner, sizeof(GTokenType));
+
+  *token_p = *(GTokenType *) scanner->cache_p;
+  scanner->cache_p += sizeof (GTokenType);
+
+  switch (*token_p)
+    {
+    case G_TOKEN_STRING:
+    case G_TOKEN_IDENTIFIER:
+    case G_TOKEN_IDENTIFIER_NULL:
+    case G_TOKEN_COMMENT_SINGLE:
+    case G_TOKEN_COMMENT_MULTI:
+      ENSURE_AVAILABLE (scanner, sizeof (gint));
+
+      len = *(gint *) scanner->cache_p;
+      scanner->cache_p += sizeof (gint);
+
+      ENSURE_AVAILABLE (scanner, len);
+
+      value_p->v_string = (gchar *) scanner->cache_p;
+      scanner->cache_p += len;
+      break;
+
+    case G_TOKEN_ERROR:
+    case G_TOKEN_EOF:
+      break;
+
+    case G_TOKEN_LEFT_PAREN:
+    case G_TOKEN_RIGHT_PAREN:
+    case G_TOKEN_LEFT_CURLY:
+    case G_TOKEN_RIGHT_CURLY:
+    case G_TOKEN_LEFT_BRACE:
+    case G_TOKEN_RIGHT_BRACE:
+    case G_TOKEN_EQUAL_SIGN:
+    case G_TOKEN_COMMA:
+      value_p->v_int64 = *token_p;
+      break;
+
+    default:
+      if (*token_p < G_TOKEN_LAST)
+	{
+          ENSURE_AVAILABLE (scanner, sizeof (GTokenValue));
+
+/*	  *value_p = *(GTokenValue *)scanner->cache_p;*/
+          memcpy (value_p, scanner->cache_p, sizeof (GTokenValue));
+	  scanner->cache_p += sizeof (GTokenValue);
+	}
+      else
+	value_p->v_int64 = 0;
+
+      break;
+    }
+
+  return TRUE;
+
+eof:
+  *token_p = G_TOKEN_ERROR;
+  value_p->v_error = G_ERR_UNEXP_EOF;
+  return TRUE;
+
+#undef ENSURE_AVAILABLE
+}
+#endif /* MAEMO_CHANGES */
+
 /**
  * g_scanner_peek_next_token:
  * @scanner: a #GScanner
@@ -949,15 +1072,140 @@ g_scanner_peek_next_token (GScanner	*scanner)
     {
       scanner->next_line = scanner->line;
       scanner->next_position = scanner->position;
-      g_scanner_get_token_i (scanner,
-			     &scanner->next_token,
-			     &scanner->next_value,
-			     &scanner->next_line,
-			     &scanner->next_position);
+
+#ifdef MAEMO_CHANGES
+      if (!g_scanner_get_token_cache (scanner,
+                                      &scanner->next_token,
+                                      &scanner->next_value,
+                                      &scanner->next_line,
+                                      &scanner->next_position))
+        {
+#endif /* MAEMO_CHANGES */
+          g_scanner_get_token_i (scanner,
+                                 &scanner->next_token,
+                                 &scanner->next_value,
+                                 &scanner->next_line,
+                                 &scanner->next_position);
+#ifdef MAEMO_CHANGES
+        }
+#endif /* MAEMO_CHANGES */
     }
   
   return scanner->next_token;
 }
+
+#ifdef MAEMO_CHANGES
+static void
+g_scanner_cache_token (GScanner *scanner)
+{
+  gint count;
+
+  if (scanner->cache_fd == -1 || scanner->cache_p != NULL)
+    return;
+
+  if (scanner->token == G_TOKEN_ERROR)
+    g_error ("%s: rc file parse error while writing cache for '%s'. Aborting.",
+             G_STRFUNC, INPUT_NAME (scanner));
+
+  do
+    {
+      count = write (scanner->cache_fd, &scanner->token,
+                     sizeof (scanner->token));
+    }
+  while (count == -1 && (errno == EINTR || errno == EAGAIN));
+
+  if (count != sizeof (scanner->token))
+    g_error ("%s: error while writing cache for '%s': %s. Aborting.",
+             G_STRFUNC, INPUT_NAME (scanner), g_strerror (errno));
+
+#define G_SCANNER_CACHE_MEM_ALIGN (MAX (sizeof (double), sizeof (void)))
+
+  switch (scanner->token)
+    {
+      gint len;
+      gint lena;
+
+    case G_TOKEN_STRING:
+    case G_TOKEN_IDENTIFIER:
+    case G_TOKEN_IDENTIFIER_NULL:
+    case G_TOKEN_COMMENT_SINGLE:
+    case G_TOKEN_COMMENT_MULTI:
+      /* pad strings to multiple of G_SCANNER_CACHE_MEM_ALIGN */
+      lena = len = strlen (scanner->value.v_string) + 1;
+      if (lena % G_SCANNER_CACHE_MEM_ALIGN)
+        lena += G_SCANNER_CACHE_MEM_ALIGN - (lena % G_SCANNER_CACHE_MEM_ALIGN);
+
+      do
+        {
+          count = write (scanner->cache_fd, &lena, sizeof (lena));
+        }
+      while (count == -1 && (errno == EINTR || errno == EAGAIN));
+
+      if (count != sizeof (lena))
+        g_error ("%s: error while writing cache for '%s': %s. Aborting.",
+                 G_STRFUNC, INPUT_NAME (scanner), g_strerror (errno));
+
+      do
+        {
+          count = write (scanner->cache_fd, scanner->value.v_string, len);
+        }
+      while (count == -1 && (errno == EINTR || errno == EAGAIN));
+
+      if (count != len)
+        g_error ("%s: error while writing cache for '%s': %s. Aborting.",
+                 G_STRFUNC, INPUT_NAME (scanner), g_strerror (errno));
+
+      if (lena > len)
+        {
+          do
+            {
+              count = write (scanner->cache_fd, "\0\0\0\0\0\0\0\0", lena - len);
+            }
+          while (count == -1 && (errno == EINTR || errno == EAGAIN));
+
+          if (count != lena - len)
+            g_error ("%s: error while writing cache for '%s': %s. Aborting.",
+                     G_STRFUNC, INPUT_NAME (scanner), g_strerror (errno));
+        }
+      break;
+
+    case G_TOKEN_EOF:
+      if (close (scanner->cache_fd) == -1)
+        g_error ("%s: error while writing cache for '%s': %s. Aborting.",
+                 G_STRFUNC, INPUT_NAME (scanner), g_strerror (errno));
+      scanner->cache_fd = -1;
+      break;
+
+    case G_TOKEN_LEFT_PAREN:
+    case G_TOKEN_RIGHT_PAREN:
+    case G_TOKEN_LEFT_CURLY:
+    case G_TOKEN_RIGHT_CURLY:
+    case G_TOKEN_LEFT_BRACE:
+    case G_TOKEN_RIGHT_BRACE:
+    case G_TOKEN_EQUAL_SIGN:
+    case G_TOKEN_COMMA:
+      break;
+
+    default:
+      if (scanner->token < G_TOKEN_LAST)
+        {
+          do
+            {
+              count = write (scanner->cache_fd, &scanner->value,
+                             sizeof (scanner->value));
+            }
+          while (count == -1 && (errno == EINTR || errno == EAGAIN));
+
+          if (count != sizeof (scanner->value))
+            g_error ("%s: error while writing cache for '%s': %s. Aborting.",
+                     G_STRFUNC, INPUT_NAME (scanner), g_strerror (errno));
+        }
+      else
+        g_assert (scanner->token == scanner->value.v_int);
+      break;
+    }
+}
+#endif /* MAEMO_CHANGES */
 
 /**
  * g_scanner_get_next_token:
@@ -977,21 +1225,39 @@ g_scanner_get_next_token (GScanner	*scanner)
   
   if (scanner->next_token != G_TOKEN_NONE)
     {
-      g_scanner_free_value (&scanner->token, &scanner->value);
-      
+#ifdef MAEMO_CHANGES
+      if (scanner->cache_p == NULL)
+#endif /* MAEMO_CHANGES */
+        g_scanner_free_value (&scanner->token, &scanner->value);
+
       scanner->token = scanner->next_token;
       scanner->value = scanner->next_value;
       scanner->line = scanner->next_line;
       scanner->position = scanner->next_position;
       scanner->next_token = G_TOKEN_NONE;
     }
+#ifdef MAEMO_CHANGES
+  else if (g_scanner_get_token_cache (scanner,
+				      &scanner->token,
+				      &scanner->value,
+				      &scanner->line,
+				      &scanner->position))
+    {
+      return scanner->token;
+    }
+#endif /* MAEMO_CHANGES */
   else
     g_scanner_get_token_i (scanner,
-			   &scanner->token,
-			   &scanner->value,
-			   &scanner->line,
-			   &scanner->position);
-  
+                           &scanner->token,
+                           &scanner->value,
+                           &scanner->line,
+                           &scanner->position);
+
+#ifdef MAEMO_CHANGES
+  if (scanner->cache_flags & HILDON_SCANNER_CACHE_FLAGS_WRITE)
+    g_scanner_cache_token (scanner);
+#endif /* MAEMO_CHANGES */
+
   return scanner->token;
 }
 
@@ -1090,6 +1356,79 @@ g_scanner_eof (GScanner	*scanner)
   
   return scanner->token == G_TOKEN_EOF || scanner->token == G_TOKEN_ERROR;
 }
+
+#ifdef MAEMO_CHANGES
+void
+hildon_g_scanner_cache_open (GScanner    *scanner,
+                             const gchar *filename)
+{
+  gchar       *filename_cache;
+  struct stat  st_rc;
+  struct stat  st_cache;
+  gint         fd;
+  gpointer     cache_p = NULL;
+  gsize        cache_size = 0;
+
+  g_return_if_fail (scanner != NULL);
+  g_return_if_fail (filename != NULL);
+
+  if (fstat (scanner->input_fd, &st_rc) == -1)
+    return;
+
+  filename_cache = g_strconcat (filename, ".cache", NULL);
+
+  /* FIXME: create cache only if explicitly asked for (to be used by a
+   * standalone application, for example.)  The cache filename should
+   * also be derived from the gtkrc path, but it's not available
+   * without modifications to gtk+
+   */
+
+  if (getenv ("HILDON_SCANNER_CACHE_CREATE"))
+    {
+      /* we don't care if this file exists or not, just delete it */
+      g_remove (filename_cache);
+
+      fd = g_open (filename_cache, O_CREAT|O_EXCL|O_WRONLY|O_TRUNC, 0666);
+
+      if (fd != -1)
+        scanner->cache_flags |= HILDON_SCANNER_CACHE_FLAGS_WRITE;
+      else
+        g_printerr ("%s: error while writing cache: %s. Not creating cache.",
+                    G_STRFUNC, g_strerror (errno));
+    }
+  else
+    {
+      fd = g_open (filename_cache, O_RDONLY);
+      if (fd != -1)
+        {
+          if (fstat (fd, &st_cache) == 0 &&
+              st_rc.st_mtime <= st_cache.st_mtime)
+            {
+              gpointer ptr;
+
+              ptr = mmap (NULL, st_cache.st_size, PROT_READ, MAP_SHARED, fd, 0);
+              if (ptr != MAP_FAILED)
+                {
+                  cache_p = ptr;
+                  cache_size = st_cache.st_size;
+                }
+            }
+
+          /* after mmap the file descriptor is no longer needer */
+          close (fd);
+          fd = -1;
+        }
+    }
+
+  g_free (filename_cache);
+
+  scanner->cache_fd = fd;
+  scanner->cache_size = cache_size;
+  scanner->cache_base = cache_p;
+  scanner->cache_p = cache_p;
+  scanner->cache_end = cache_p + cache_size;
+}
+#endif /* MAEMO_CHANGES */
 
 /**
  * g_scanner_input_file:
