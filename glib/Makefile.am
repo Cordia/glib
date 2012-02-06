@@ -47,6 +47,9 @@ AM_CPPFLAGS = 				\
 	-DGLIB_COMPILATION 		\
 	-DPCRE_STATIC
 
+# force frame-pointers for source files with noreturn functions for backtraces
+AM_CFLAGS = $(patsubst %, $(ARM_FRAME_FLAGS), $(filter $(<F), gmessages.c gtestutils.c ))
+
 glib.def: glib.symbols
 	$(AM_V_GEN) (echo EXPORTS; $(CPP) -P -DG_OS_WIN32 - <$(srcdir)/glib.symbols | sed -e '/^$$/d' -e 's/^/	/') > $(builddir)/glib.def
 

@@ -2351,8 +2351,14 @@ fi
 
 dnl We need a more robust approach here...
 case $host_cpu in
-  i?86|x86_64|s390|s390x|arm*|crisv32*|etrax*)
+  i?86|x86_64|s390|s390x|crisv32*|etrax*)
     glib_memory_barrier_needed=no
+    ;;
+  arm*)
+    glib_memory_barrier_needed=no
+    # some ARM CPUs and gcc versions need flags for proper backtraces
+    ARM_FRAME_FLAGS="-fno-omit-frame-pointer -mapcs-frame"
+    AC_SUBST(ARM_FRAME_FLAGS)
     ;;
   sparc*|alpha*|powerpc*|ia64)
     glib_memory_barrier_needed=yes
