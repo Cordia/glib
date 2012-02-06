@@ -97,8 +97,8 @@ typedef int (*XdgDirectoryFunc) (const char *directory,
 				 void       *user_data);
 
 static void
-xdg_dir_time_list_add (char   *file_name, 
-		       time_t  mtime)
+xdg_dir_time_list_add (const char *file_name,
+		       time_t      mtime)
 {
   XdgDirTimeList *list;
 
@@ -106,14 +106,14 @@ xdg_dir_time_list_add (char   *file_name,
     {
       if (strcmp (list->directory_name, file_name) == 0)
         {
-          free (file_name);
           return;
         }
     }
   
   list = calloc (1, sizeof (XdgDirTimeList));
   list->checked = XDG_CHECKED_UNCHECKED;
-  list->directory_name = file_name;
+  list->directory_name = malloc (strlen (file_name) + 1);
+  strcpy (list->directory_name, file_name);
   list->mtime = mtime;
   list->next = dir_time_list;
   dir_time_list = list;
@@ -138,11 +138,19 @@ xdg_mime_init_from_directory (const char *directory)
 {
   char *file_name;
   struct stat st;
+  int dirlen;
 
   assert (directory != NULL);
 
-  file_name = malloc (strlen (directory) + strlen ("/mime/mime.cache") + 1);
-  strcpy (file_name, directory); strcat (file_name, "/mime/mime.cache");
+  dirlen = strlen (directory) + strlen ("/mime/");
+  file_name = alloca (dirlen + 30);
+  strcpy (file_name, directory);
+  strcat (file_name, "/mime/");
+
+  if (access (file_name, X_OK) != 0)
+    return FALSE;
+
+  strcpy (file_name + dirlen, "mime.cache");
   if (stat (file_name, &st) == 0)
     {
       XdgMimeCache *cache = _xdg_mime_cache_new_from_file (file_name);
@@ -159,10 +167,8 @@ xdg_mime_init_from_directory (const char *directory)
 	  return FALSE;
 	}
     }
-  free (file_name);
 
-  file_name = malloc (strlen (directory) + strlen ("/mime/globs2") + 1);
-  strcpy (file_name, directory); strcat (file_name, "/mime/globs2");
+  strcpy (file_name + dirlen, "globs2");
   if (stat (file_name, &st) == 0)
     {
       _xdg_mime_glob_read_from_file (global_hash, file_name, TRUE);
@@ -170,51 +176,32 @@ xdg_mime_init_from_directory (const char *directory)
     }
   else
     {
-      free (file_name);
-      file_name = malloc (strlen (directory) + strlen ("/mime/globs") + 1);
-      strcpy (file_name, directory); strcat (file_name, "/mime/globs");
+      strcpy (file_name + dirlen, "globs");
       if (stat (file_name, &st) == 0)
         {
           _xdg_mime_glob_read_from_file (global_hash, file_name, FALSE);
           xdg_dir_time_list_add (file_name, st.st_mtime);
         }
-      else
-        {
-          free (file_name);
-        }
     }
 
-  file_name = malloc (strlen (directory) + strlen ("/mime/magic") + 1);
-  strcpy (file_name, directory); strcat (file_name, "/mime/magic");
+  strcpy (file_name + dirlen, "magic");
   if (stat (file_name, &st) == 0)
     {
       _xdg_mime_magic_read_from_file (global_magic, file_name);
       xdg_dir_time_list_add (file_name, st.st_mtime);
     }
-  else
-    {
-      free (file_name);
-    }
 
-  file_name = malloc (strlen (directory) + strlen ("/mime/aliases") + 1);
-  strcpy (file_name, directory); strcat (file_name, "/mime/aliases");
+  strcpy (file_name + dirlen, "aliases");
   _xdg_mime_alias_read_from_file (alias_list, file_name);
-  free (file_name);
 
-  file_name = malloc (strlen (directory) + strlen ("/mime/subclasses") + 1);
-  strcpy (file_name, directory); strcat (file_name, "/mime/subclasses");
+  strcpy (file_name + dirlen, "subclasses");
   _xdg_mime_parent_read_from_file (parent_list, file_name);
-  free (file_name);
 
-  file_name = malloc (strlen (directory) + strlen ("/mime/icons") + 1);
-  strcpy (file_name, directory); strcat (file_name, "/mime/icons");
+  strcpy (file_name + dirlen, "icons");
   _xdg_mime_icon_read_from_file (icon_list, file_name);
-  free (file_name);
 
-  file_name = malloc (strlen (directory) + strlen ("/mime/generic-icons") + 1);
-  strcpy (file_name, directory); strcat (file_name, "/mime/generic-icons");
+  strcpy (file_name + dirlen, "generic-icons");
   _xdg_mime_icon_read_from_file (generic_icon_list, file_name);
-  free (file_name);
 
   return FALSE; /* Keep processing */
 }
@@ -342,14 +329,21 @@ xdg_check_dir (const char *directory,
 {
   int invalid, exists;
   char *file_name;
+  int dirlen;
 
   assert (directory != NULL);
 
+  dirlen = strlen (directory) + strlen ("/mime/");
+  file_name = alloca (dirlen + 30);
+  strcpy (file_name, directory);
+  strcat (file_name, "/mime/");
+
+  if (access (file_name, X_OK) != 0)
+    return FALSE;
+
   /* Check the mime.cache file */
-  file_name = malloc (strlen (directory) + strlen ("/mime/mime.cache") + 1);
-  strcpy (file_name, directory); strcat (file_name, "/mime/mime.cache");
+  strcpy (file_name + dirlen, "mime.cache");
   invalid = xdg_check_file (file_name, &exists);
-  free (file_name);
   if (invalid)
     {
       *invalid_dir_list = TRUE;
@@ -361,10 +355,8 @@ xdg_check_dir (const char *directory,
     }
 
   /* Check the globs file */
-  file_name = malloc (strlen (directory) + strlen ("/mime/globs") + 1);
-  strcpy (file_name, directory); strcat (file_name, "/mime/globs");
+  strcpy (file_name + dirlen, "globs");
   invalid = xdg_check_file (file_name, NULL);
-  free (file_name);
   if (invalid)
     {
       *invalid_dir_list = TRUE;
@@ -372,10 +364,8 @@ xdg_check_dir (const char *directory,
     }
 
   /* Check the magic file */
-  file_name = malloc (strlen (directory) + strlen ("/mime/magic") + 1);
-  strcpy (file_name, directory); strcat (file_name, "/mime/magic");
+  strcpy (file_name + dirlen, "magic");
   invalid = xdg_check_file (file_name, NULL);
-  free (file_name);
   if (invalid)
     {
       *invalid_dir_list = TRUE;
