@@ -152,9 +152,13 @@ void g_assert_warning         (const char *log_domain,
 #define g_warning(...)  g_log (G_LOG_DOMAIN,         \
                                G_LOG_LEVEL_WARNING,  \
                                __VA_ARGS__)
+#ifndef G_DEBUG_DISABLE
 #define g_debug(...)    g_log (G_LOG_DOMAIN,         \
                                G_LOG_LEVEL_DEBUG,    \
                                __VA_ARGS__)
+#else
+#define g_debug(...)
+#endif
 #elif defined(G_HAVE_GNUC_VARARGS)
 #define g_error(format...)    G_STMT_START {                 \
                                 g_log (G_LOG_DOMAIN,         \
@@ -172,9 +176,13 @@ void g_assert_warning         (const char *log_domain,
 #define g_warning(format...)    g_log (G_LOG_DOMAIN,         \
                                        G_LOG_LEVEL_WARNING,  \
                                        format)
+#ifndef G_DEBUG_DISABLE
 #define g_debug(format...)      g_log (G_LOG_DOMAIN,         \
                                        G_LOG_LEVEL_DEBUG,    \
                                        format)
+#else
+#define g_debug(...)
+#endif
 #else   /* no varargs macros */
 static void
 g_error (const gchar *format,
@@ -214,6 +222,7 @@ g_warning (const gchar *format,
   g_logv (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, format, args);
   va_end (args);
 }
+#ifndef G_DEBUG_DISABLE
 static void
 g_debug (const gchar *format,
          ...)
@@ -223,6 +232,14 @@ g_debug (const gchar *format,
   g_logv (G_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, format, args);
   va_end (args);
 }
+#else
+static void
+g_debug (const gchar *format,
+		...)
+{
+	; /* debug logging disabled */
+}
+#endif
 #endif  /* !__GNUC__ */
 
 /**

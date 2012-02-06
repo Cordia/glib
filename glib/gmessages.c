@@ -46,6 +46,8 @@
  * flow, only to give a perhaps-helpful warning before giving up.
  */
 
+#define MAEMO_SYSLOG_ENABLED	/* Maemo builds will temporary use syslog for logging */
+
 #include "config.h"
 
 #include <stdlib.h>
@@ -210,6 +212,10 @@
  *
  * Since: 2.6
  */
+
+#ifdef MAEMO_SYSLOG_ENABLED
+#include <syslog.h>
+#endif
 
 /* --- structures --- */
 typedef struct _GLogDomain	GLogDomain;
@@ -1076,6 +1082,7 @@ _g_log_fallback_handler (const gchar   *log_domain,
   write_string (fd, message);
 }
 
+#ifndef MAEMO_SYSLOG_ENABLED
 static void
 escape_string (GString *string)
 {
@@ -1135,6 +1142,7 @@ escape_string (GString *string)
 	p = g_utf8_next_char (p);
     }
 }
+#endif /* not MAEMO_SYSLOG_ENABLED */
 
 /**
  * g_log_default_handler:
@@ -1173,6 +1181,141 @@ escape_string (GString *string)
  * %G_LOG_LEVEL_WARNING and %G_LOG_LEVEL_MESSAGE. stdout is used for
  * the rest.
  */
+#ifdef MAEMO_SYSLOG_ENABLED
+/* That is a syslog version of default log handler. */
+/* It shall be used only in case that MAEMO_SYSLOG_ENABLED switched on. */
+
+#define IS_EMPTY_STRING(s)	(NULL == (s) || 0 == *(s))
+
+#define GLIB_PREFIX	"GLIB"
+#define DEFAULT_DOMAIN	"default"
+#define DEFAULT_MESSAGE	"(NULL) message"
+
+static unsigned int G_LOG_OUTPUT_LEVEL;
+
+enum
+  {
+    G_LOG_OUTPUT_LEVEL_MIN = 0,
+    G_LOG_OUTPUT_LEVEL_CRITICAL,
+    G_LOG_OUTPUT_LEVEL_WARNING,
+    G_LOG_OUTPUT_LEVEL_MAX
+  };
+
+#define G_LOG_OUTPUT_LEVEL_DEF G_LOG_OUTPUT_LEVEL_MAX
+
+void g_log_default_handler (
+		const gchar*	log_domain,
+		GLogLevelFlags	log_level,
+		const gchar*	message,
+		gpointer	unused_data
+	)
+{
+	/* This value will be switched to TRUE when log facility is initialized */
+	static gboolean initialized = FALSE;
+
+	/* This call only variables */
+	const gchar* alert    = (log_level & ALERT_LEVELS ? " ** " : " ");
+	const gchar* aborting = (log_level & G_LOG_FLAG_FATAL ? "\naborting..." : "");
+
+	const gchar* prefix;
+	int   priority;
+
+	gchar *output_level;
+	int level;
+
+	/* Check first that logging facility is initialized */
+	if ( !initialized )
+	{
+		openlog(NULL, LOG_PERROR|LOG_PID, LOG_USER);
+		initialized = !initialized;
+
+		G_LOG_OUTPUT_LEVEL = G_LOG_OUTPUT_LEVEL_DEF;
+
+		output_level = getenv("G_LOG_OUTPUT_LEVEL");
+		if (output_level)
+		  {
+		    level = atoi(output_level);
+
+		    if (level >= G_LOG_OUTPUT_LEVEL_MIN &&
+			level <= G_LOG_OUTPUT_LEVEL_MAX)
+		      {
+			G_LOG_OUTPUT_LEVEL = level;
+		      }
+		  }
+	}
+
+	/* Validate log domain */
+	if ( IS_EMPTY_STRING(log_domain) )
+		log_domain = DEFAULT_DOMAIN;
+
+	/* Check log message for validity */
+	if ( IS_EMPTY_STRING(message) )
+		message = DEFAULT_MESSAGE;
+
+
+	/* no logging on minimal output level */
+	if (G_LOG_OUTPUT_LEVEL == G_LOG_OUTPUT_LEVEL_MIN)
+	  {
+	    return;
+	  }
+
+	/* if warning|message and level critical, return */
+	if ((log_level & G_LOG_LEVEL_MASK) >= G_LOG_LEVEL_WARNING)
+	  {
+	    if (G_LOG_OUTPUT_LEVEL == (G_LOG_OUTPUT_LEVEL_CRITICAL))
+	      {
+		return;
+	      }
+	  }
+
+	/* if message and level warning, return */
+	if ((log_level & G_LOG_LEVEL_MASK) >= G_LOG_LEVEL_MESSAGE)
+	  {
+	    if (G_LOG_OUTPUT_LEVEL <= (G_LOG_OUTPUT_LEVEL_WARNING))
+	      {
+		return;
+	      }
+	  }
+
+	/* Process the message prefix and priority */
+	switch (log_level & G_LOG_LEVEL_MASK)
+	{
+		case G_LOG_FLAG_FATAL:
+			prefix   = "FATAL";
+			priority = LOG_EMERG;
+		break;
+		case G_LOG_LEVEL_ERROR:
+			prefix   = "ERROR";
+			priority = LOG_ERR;
+		break;
+		case G_LOG_LEVEL_CRITICAL:
+			prefix   = "CRITICAL";
+			priority = LOG_CRIT;
+		break;
+		case G_LOG_LEVEL_WARNING:
+			prefix   = "WARNING";
+			priority = LOG_WARNING;
+		break;
+		case G_LOG_LEVEL_MESSAGE:
+			prefix   = "MESSAGE";
+			priority = LOG_NOTICE;
+		break;
+		case G_LOG_LEVEL_INFO:
+			prefix   = "INFO";
+			priority = LOG_INFO;
+		break;
+		default:
+			prefix   = "DEBUG";
+			priority = LOG_DEBUG;
+		break;
+	} /* switch log_level */
+
+	/* Now prining the message to syslog */
+	syslog(priority, "%s %s%s%s - %s%s", GLIB_PREFIX, prefix, alert, log_domain, message, aborting);
+} /* g_log_default_handler -- syslog version */
+
+#else /* not MAEMO_SYSLOG_ENABLED -- we will use standart stderr logging */
+
 void
 g_log_default_handler (const gchar   *log_domain,
 		       GLogLevelFlags log_level,
@@ -1270,6 +1413,8 @@ g_log_default_handler (const gchar   *log_domain,
  *
  * Returns: the old print handler
  */
+#endif /* if MAEMO_SYSLOG_ENABLED */
+
 GPrintFunc
 g_set_print_handler (GPrintFunc func)
 {
