@@ -594,6 +594,14 @@ GLIB_DEPRECATED_IN_2_30
 gunichar *g_unicode_canonical_decomposition (gunichar  ch,
                                              gsize    *result_len) G_GNUC_MALLOC;
 
+/* Compute canonical decomposition of a character.  Fills buffer with a
+   string of Unicode characters.  RESULT_LEN is set to the resulting
+   length of the string.  */
+gboolean g_unicode_canonical_decomposition_to_buffer (gunichar  ch,
+                                                      gunichar *out,
+                                                      gsize     out_len,
+				                      gsize    *result_len);
+
 /* Array of skip-bytes-per-initial character.
  */
 GLIB_VAR const gchar * const g_utf8_skip;

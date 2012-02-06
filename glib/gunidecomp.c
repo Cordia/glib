@@ -268,6 +268,78 @@ g_unicode_canonical_decomposition (gunichar ch,
   return r;
 }
 
+/**
+ * g_unicode_canonical_decomposition_to_buffer:
+ * @ch: a Unicode character.
+ * @out: a buffer to store the decomposited string of unicode characters
+ * @out_len: the size of the buffer
+ * @result_len: location to store the length of the return value.
+ *
+ * Computes the canonical decomposition of a Unicode character,
+ * storing the result in @out if it is large enough. If @out is
+ * too small, FALSE is returned and the function should be called
+ * again with a buffer of size @result_len.
+ *
+ * Return value: TRUE if @out was large enough
+ *
+ * Since: maemo
+ **/
+gboolean
+g_unicode_canonical_decomposition_to_buffer (gunichar  ch,
+                                             gunichar *out,
+                                             gsize     out_len,
+				             gsize    *result_len)
+{
+  const gchar *decomp;
+  const gchar *p;
+
+  /* Hangul syllable */
+  if (ch >= 0xac00 && ch <= 0xd7a3)
+    {
+      decompose_hangul (ch, NULL, result_len);
+
+      if (*result_len <= out_len)
+        {
+          decompose_hangul (ch, out, result_len);
+
+          return TRUE;
+        }
+      else
+        return FALSE;
+    }
+  else if ((decomp = find_decomposition (ch, FALSE)) != NULL)
+    {
+      /* Found it.  */
+      int i;
+
+      *result_len = g_utf8_strlen (decomp, -1);
+
+      if (*result_len <= out_len)
+        {
+          for (p = decomp, i = 0; *p != '\0'; p = g_utf8_next_char (p), i++)
+            out[i] = g_utf8_get_char (p);
+
+          return TRUE;
+        }
+      else
+        return FALSE;
+    }
+  else
+    {
+      /* Not in our table.  */
+      *result_len = 1;
+
+      if (out_len >= 1)
+        {
+          *out = ch;
+
+          return TRUE;
+        }
+      else
+        return FALSE;
+    }
+}
+
 /* L,V => LV and LV,T => LVT  */
 static gboolean
 combine_hangul (gunichar a,
