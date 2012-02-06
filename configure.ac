@@ -233,6 +233,18 @@ AC_ARG_ENABLE(rebuilds,
               [AC_HELP_STRING([--disable-rebuilds],
                               [disable all source autogeneration rules])],,
               [enable_rebuilds=yes])
+dnl arg to turn on maemo specific features
+AC_ARG_ENABLE(maemo,
+              AC_HELP_STRING([--with-maemo=@<:@no/yes@:>@],
+                             [enable Maemo specific features @<:@default=yes@:>@]),,
+              with_maemo=yes)
+
+dnl Handle --with-maemo option
+if test "x$with_maemo" = "xyes"; then
+  AC_DEFINE(MAEMO_CHANGES, 1, [define to 1 to enable Maemo specific features])
+fi
+
+AM_CONDITIONAL(MAEMO_CHANGES, test x$with_maemo = xyes)
 
 AC_MSG_CHECKING([whether to enable garbage collector friendliness])
 if test "x$enable_gc_friendly" = "xyes"; then
