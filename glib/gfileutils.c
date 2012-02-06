@@ -1155,7 +1155,14 @@ write_to_temp_file (const gchar  *contents,
 #endif
   
   errno = 0;
+#ifdef MAEMO_CHANGES
+  /* introduce a write-barrier for file contents before close()/rename()
+   * to work around file systems with writeback behaviour like UBIFS.
+   */
+  if (fdatasync (fileno (file)) < 0 || fclose (file) == EOF)
+#else /* !MAEMO_CHANGES */
   if (fclose (file) == EOF)
+#endif /* MAEMO_CHANGES */
     { 
       save_errno = errno;
       
