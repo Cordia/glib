@@ -599,6 +599,7 @@ static  gchar   *g_user_config_dir = NULL;
 static  gchar  **g_system_config_dirs = NULL;
 
 static  gchar  **g_user_special_dirs = NULL;
+static  GHashTable *g_user_named_dirs = NULL;
 
 /* fifteen minutes of fame for everybody */
 #define G_USER_DIRS_EXPIRE      15 * 60
@@ -1577,6 +1578,7 @@ load_user_special_dirs (void)
     {
       gchar *buffer = lines[i];
       gchar *d, *p;
+      gchar *key;
       gint len;
       gboolean is_relative = FALSE;
       GUserDirectory directory;
@@ -1589,7 +1591,9 @@ load_user_special_dirs (void)
       p = buffer;
       while (*p == ' ' || *p == '\t')
 	p++;
-      
+
+      key = p;
+
       if (strncmp (p, "XDG_DESKTOP_DIR", strlen ("XDG_DESKTOP_DIR")) == 0)
         {
           directory = G_USER_DIRECTORY_DESKTOP;
@@ -1631,13 +1635,20 @@ load_user_special_dirs (void)
           p += strlen ("XDG_VIDEOS_DIR");
         }
       else
-	continue;
+        {
+          directory = G_USER_N_DIRECTORIES;
+          while (*p != '=' && *p != '\0')
+            p++;
+        }
 
       while (*p == ' ' || *p == '\t')
 	p++;
 
       if (*p != '=')
 	continue;
+
+      *p = '\0';
+
       p++;
 
       while (*p == ' ' || *p == '\t')
@@ -1666,14 +1677,22 @@ load_user_special_dirs (void)
       len = strlen (d);
       if (d[len - 1] == '/')
         d[len - 1] = 0;
-      
+
       if (is_relative)
         {
           g_get_any_init ();
-          g_user_special_dirs[directory] = g_build_filename (g_home_dir, d, NULL);
+          if (directory < G_USER_N_DIRECTORIES)
+            g_user_special_dirs[directory] = g_build_filename (g_home_dir, d, NULL);
+          g_hash_table_insert (g_user_named_dirs, g_strdup (key),
+            g_build_filename (g_home_dir, d, NULL));
         }
       else
-	g_user_special_dirs[directory] = g_strdup (d);
+        {
+          if (directory < G_USER_N_DIRECTORIES)
+            g_user_special_dirs[directory] = g_strdup (d);
+          g_hash_table_insert (g_user_named_dirs, g_strdup (key), g_strdup (d));
+        }
+
     }
 
   g_strfreev (lines);
@@ -1682,6 +1701,34 @@ load_user_special_dirs (void)
 
 #endif /* G_OS_UNIX && !HAVE_CARBON */
 
+
+static void
+g_ensure_user_special_dirs ()
+{
+  G_LOCK (g_utils_global);
+
+  if (G_UNLIKELY (g_user_special_dirs == NULL))
+    {
+      g_user_named_dirs = g_hash_table_new_full (
+        g_str_hash, g_str_equal, g_free, g_free);
+      g_user_special_dirs = g_new0 (gchar *, G_USER_N_DIRECTORIES);
+
+      load_user_special_dirs ();
+
+      /* Special-case desktop for historical compatibility */
+      if (g_user_special_dirs[G_USER_DIRECTORY_DESKTOP] == NULL)
+        {
+          g_get_any_init ();
+
+          g_user_special_dirs[G_USER_DIRECTORY_DESKTOP] =
+            g_build_filename (g_home_dir, "Desktop", NULL);
+          g_hash_table_insert (g_user_named_dirs, g_strdup ("XDG_DESKTOP_DIR"),
+            g_build_filename (g_home_dir, "Desktop", NULL));
+        }
+    }
+
+  G_UNLOCK (g_utils_global);
+}
 
 /**
  * g_reload_user_special_dirs_cache:
@@ -1746,9 +1793,7 @@ g_reload_user_special_dirs_cache (void)
  * falls back to <filename>$HOME/Desktop</filename> when XDG special
  * user directories have not been set up. 
  *
- * Depending on the platform, the user might be able to change the path
- * of the special directory without requiring the session to restart; GLib
- * will not reflect any change once the special directories are loaded.
+ * See hildon_get_user_named_dir() for a more generic version of this function.
  *
  * Return value: the path to the specified special directory, or %NULL
  *   if the logical id was not found. The returned string is owned by
@@ -1762,27 +1807,37 @@ g_get_user_special_dir (GUserDirectory directory)
   g_return_val_if_fail (directory >= G_USER_DIRECTORY_DESKTOP &&
                         directory < G_USER_N_DIRECTORIES, NULL);
 
-  G_LOCK (g_utils_global);
-
-  if (G_UNLIKELY (g_user_special_dirs == NULL))
-    {
-      g_user_special_dirs = g_new0 (gchar *, G_USER_N_DIRECTORIES);
-
-      load_user_special_dirs ();
-
-      /* Special-case desktop for historical compatibility */
-      if (g_user_special_dirs[G_USER_DIRECTORY_DESKTOP] == NULL)
-        {
-          g_get_any_init ();
-
-          g_user_special_dirs[G_USER_DIRECTORY_DESKTOP] =
-            g_build_filename (g_home_dir, "Desktop", NULL);
-        }
-    }
-
-  G_UNLOCK (g_utils_global);
+  g_ensure_user_special_dirs ();
 
   return g_user_special_dirs[directory];
+}
+
+/**
+ * hildon_get_user_named_dir:
+ * @directory: the string id of a named directory
+ *
+ * Returns the full path of a named directory using its string id, such
+ * as for example "XDG_DOWNLOAD_DIR".
+ *
+ * On Unix this is done through the XDG special user directories which
+ * are read from ~/.config/user-dirs.dir and /etc/xdg/user-dirs.conf.
+ *
+ * Depending on the platform, the user might be able to change the path
+ * of the special directory without requiring the session to restart; GLib
+ * will not reflect any change once the special directories are loaded.
+ *
+ * Return value: the path to the specified special directory, or %NULL
+ *   if the string id was not found. The returned string is owned by
+ *   GLib and should not be modified or freed.
+ *
+ * Since: 2.22
+ */
+G_CONST_RETURN gchar *
+hildon_get_user_named_dir (const gchar* directory)
+{
+  g_ensure_user_special_dirs ();
+
+  return g_hash_table_lookup (g_user_named_dirs, directory);
 }
 
 #ifdef G_OS_WIN32

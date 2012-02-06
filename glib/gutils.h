@@ -168,6 +168,8 @@ typedef enum {
 
 const gchar * g_get_user_special_dir (GUserDirectory directory);
 
+const gchar* hildon_get_user_named_dir (const gchar* directory);
+
 /**
  * GDebugKey:
  * @key: the string

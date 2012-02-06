@@ -1374,6 +1374,9 @@ g_get_user_data_dir
 g_reload_user_special_dirs_cache
 g_get_user_runtime_dir
 g_get_user_special_dir
+#ifdef MAEMO_CHANGES
+hildon_get_user_named_dir
+#endif
 #ifndef _WIN64
 g_get_user_name PRIVATE
 #endif
